@@ -1,2 +1,4 @@
 [tool.vercel]
 entrypoint = "src.web_app.app:app"
+[project]
+requires-python = ">=3.12,<3.13"
