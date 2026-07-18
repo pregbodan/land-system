@@ -1,0 +1,13 @@
+{
+  "best_model_name": "XGBoost",
+  "best_accuracy": 0.9731232622798888,
+  "label_encoder_classes": [
+    "dismissed",
+    "granted",
+    "matter remitted",
+    "other"
+  ],
+  "feature_count": 1014,
+  "inference_artifacts_path": "data\\models\\inference_artifacts.pkl",
+  "case_reference_records_count": 5392
+}

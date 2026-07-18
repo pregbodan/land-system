@@ -1,0 +1,266 @@
+LAND MATTER PREDICTION SYSTEM
+DETAILED PROJECT REPORT
+
+1. PROJECT OVERVIEW
+
+The Land Matter Prediction System is a machine learning-based legal analysis platform designed to predict outcomes of Nigerian land-matter cases. The system ingests judgment text or uploaded case files, extracts legal and structural signals, trains multiple machine learning models, retrieves relevant statutory provisions, cites similar trained cases, and provides a hybrid prediction that combines model output with offline Ollama reasoning.
+
+The system is built to support three kinds of users:
+- Regular users who can submit plain-language descriptions of a land dispute.
+- Lawyers who can provide formal case narratives with facts, issues, reliefs, and decision details.
+- Judges or legal researchers who can provide structured judicial text for deeper analysis.
+
+The system is not just a single classifier. It is a full legal decision-support pipeline with:
+- Structured data loading from CSV and JSON.
+- PDF and DOCX judgment extraction.
+- Text cleaning and legal feature engineering.
+- Multi-model training and evaluation.
+- Hybrid prediction using the best three trained models.
+- Offline Ollama-based explanation and probability blending.
+- Statute retrieval for the Nigerian Land Use Act and Evidence Act.
+- Related-case citation from previously trained cases.
+- Feedback collection and retraining support.
+
+2. PROJECT INPUTS AND DATA SOURCES
+
+The training log in `log.txt` shows that the system was trained on two structured datasets:
+- `data/structured/cases.csv`
+- `data/structured/scn-cases.csv`
+
+These files were merged during training into a single dataset of 5,392 usable rows after removing 166 rows with missing outcome labels. The system then converted raw legal text into a feature matrix of 1,014 total features.
+
+The project also uses legal reference sources:
+- `data/legal/Nigerian-land-use-act-2004.pdf`
+- `data/legal/evidence-act-2011.pdf`
+
+These statutes are used during prediction to provide section-level support for outcome analysis and statutory context.
+
+3. SYSTEM WORKFLOW
+
+The system works in the following order:
+
+Step 1: Data loading
+- The training pipeline loads structured case records from CSV or JSON.
+- The loader normalizes different schemas and merges columns into a canonical structure.
+- Missing or unclear outcomes are filtered out.
+
+Step 2: Preprocessing
+- The text preprocessing layer cleans the legal text.
+- Outcome labels are normalized into a stable label set.
+- Rare classes are mapped to `other` when needed.
+
+Step 3: Feature engineering
+- TF-IDF features are generated from the legal text.
+- Structural features are extracted from section-style case content.
+- Metadata features are added where available.
+- The final feature matrix combines lexical, structural, and metadata signals.
+
+Step 4: Model training
+- Multiple machine learning models are trained.
+- Each model is evaluated on the test split.
+- The system selects the best performing model based on accuracy.
+
+Step 5: Artifact saving
+- Trained models are saved to `data/models/`.
+- Training metrics are saved to JSON files.
+- Inference artifacts are saved for prediction-time reuse.
+- Case citation records are also generated for related-case lookup.
+
+Step 6: Prediction and explanation
+- A user submits either raw text or an uploaded document.
+- The text is cleaned and transformed into the same feature space used at training time.
+- The top three trained models are combined for the ML prediction.
+- Ollama contributes 20 percent of the final hybrid output and also produces a natural-language explanation when enabled.
+- Statute sections and related trained cases are retrieved and shown with the result.
+
+Step 7: Feedback and learning loop
+- Users can save corrected outcomes as feedback.
+- The feedback file can be fed back into retraining.
+- This allows the system to improve over time as more validated cases are collected.
+
+4. TRAINING PIPELINE DETAILS
+
+The training log shows two important training runs.
+
+Initial structured-data training:
+- Input files: `cases.csv` and `scn-cases.csv`
+- Rows merged: 5,392
+- TF-IDF features: 1,000
+- Structural features: 12
+- Metadata features: 2
+- Total features: 1,014
+- Train set: 4,313 samples
+- Test set: 1,079 samples
+
+The first run reported these model results:
+- XGBoost: 94.81% accuracy
+- Random Forest: 94.35% accuracy
+- Gradient Boosting: 93.98% accuracy
+- SVM: 32.16% accuracy
+- Naive Bayes: 31.79% accuracy
+
+The best model in that run was XGBoost.
+
+Retraining run with feedback support:
+- The system was retrained using the same structured datasets plus an optional feedback file.
+- The log reports that no usable feedback cases were found in `data/models/prediction_feedback.jsonl`.
+- The system also reported a land-signal ratio of 2.19 percent, which is very low.
+- That warning means the training text is likely mixed-domain and may include many cases that are not pure land matters.
+
+Despite the warning, the second run performed better:
+- XGBoost: 97.31% accuracy
+- Random Forest: 96.85% accuracy
+- Gradient Boosting: 96.66% accuracy
+- Naive Bayes: 32.34% accuracy
+- SVM: 31.88% accuracy
+
+The best model remained XGBoost, now with 97.31% accuracy.
+
+Cross-validation results for the best model:
+- Accuracy: 96.98% +/- 0.27%
+- Precision: 96.39% +/- 0.24%
+- Recall: 96.98% +/- 0.27%
+- F1-score: 96.65% +/- 0.28%
+
+5. MODEL BEHAVIOR AND INTERPRETATION
+
+The system is designed to identify legal patterns associated with land disputes. Typical signals include:
+- Ownership and title disputes
+- Declaration of title claims
+- Trespass allegations
+- Injunction requests
+- Governor's consent issues
+- Certificate of occupancy references
+- Section 22 and Section 28 Land Use Act references
+- Documentary and witness evidence references
+- Boundary and inheritance disputes
+
+The model is not a pure language generator. It is a statistical classifier trained on historical cases. This means its predictions are driven primarily by patterns learned from the training data. The system currently blends:
+- 80 percent from the trained machine learning models
+- 20 percent from Ollama reasoning
+
+This hybrid design is intended to keep the output grounded in learned case patterns while still providing a readable explanation.
+
+6. STATUTE SUPPORT
+
+The system includes statute retrieval for:
+- Nigerian Land Use Act
+- Evidence Act 2011
+
+These statutes are indexed by section and used in two ways:
+- Related sections are listed for the user when a case mentions land ownership, consent, evidence, trespass, or acquisition issues.
+- The retrieved sections are injected into the prediction context so the explanation layer can refer to the most relevant provisions.
+
+This is important because land cases in Nigeria often depend on statutory interpretation, especially around:
+- Governor's consent
+- Rights of occupancy
+- Revocation and compensation
+- Documentary admissibility
+- Oral and documentary evidence
+
+7. RELATED CASE CITATION
+
+The system now saves citation-ready case records during training.
+
+How it works:
+- Each training row is converted into a compact reference record.
+- The reference index stores case title, outcome, court, year, and snippet text.
+- At prediction time, the system searches for similar trained cases.
+- The top matches are returned as related cases with similarity scores and short snippets.
+
+This helps users see how the current query relates to the system's historical training cases.
+
+8. REQUESTER MODES OF OPERATION
+
+The system supports different input styles depending on who is submitting the case.
+
+Regular user mode:
+- Plain-language submission is accepted.
+- The user can describe the dispute naturally.
+- Example: "My land inherited from my grandfather was taken by government without compensation."
+
+Lawyer mode:
+- Formal legal phrasing is expected.
+- Example: party names, facts, issues, reliefs, and evidence are included.
+
+Judge mode:
+- Structured judicial framing is expected.
+- Example: facts, issues for determination, analysis, and orders are presented in a judgment style.
+
+This design allows the system to handle both informal public input and formal legal case text.
+
+9. OLLAMA MODE OF OPERATION
+
+Ollama is used offline for explanation generation and hybrid reasoning.
+
+The system supports:
+- HTTP-based Ollama access when a local Ollama server is available.
+- CLI fallback when the local API is not reachable.
+
+If the Ollama service is unavailable, the system continues to work using the trained model output. This prevents the explanation layer from breaking the main prediction flow.
+
+10. OUTPUTS GENERATED BY THE SYSTEM
+
+The system produces:
+- Predicted outcome label
+- Confidence score
+- Probability distribution over outcome classes
+- Model-specific prediction details
+- Ollama explanation when enabled
+- Related statute sections
+- Related trained cases
+- Rule-based sanity check output
+- Feedback storage for later retraining
+
+11. SAVED ARTIFACTS
+
+The training process creates the following important files in `data/models/`:
+- `best_model.pkl`
+- `random_forest.pkl`
+- `xgboost.pkl`
+- `svm.pkl`
+- `naive_bayes.pkl`
+- `gradient_boosting.pkl`
+- `training_results.json`
+- `cv_results.json`
+- `model_metadata.json`
+- `inference_artifacts.pkl`
+- `case_reference_records.json`
+
+These files are required for inference, web UI operation, citation lookup, and retraining support.
+
+12. KEY OBSERVATIONS FROM THE LOG
+
+The log shows that the system is functional and stable after retraining.
+
+Important observations:
+- Structured data loading is working correctly.
+- Rare class remapping is working.
+- Feature engineering completes successfully.
+- Model training and saving complete successfully.
+- Cross-validation is available and runs on the best model.
+- No usable feedback cases were found during the retraining run.
+- The land-signal ratio warning indicates the dataset should be further cleaned or filtered if the goal is pure land-matter prediction.
+
+13. LIMITATIONS AND RISKS
+
+The log and training behavior suggest a few operational risks:
+- The training dataset may include non-land cases.
+- Some classes are heavily imbalanced.
+- SVM and Naive Bayes are weak compared with tree-based models.
+- Feedback retraining will only help once validated feedback is actually collected.
+- Statistical accuracy alone does not guarantee legal correctness for a specific dispute.
+
+14. CONCLUSION
+
+The Land Matter Prediction System is a hybrid legal AI platform that combines machine learning, statute retrieval, related-case citation, and offline explanation generation. Based on the training log, the system currently achieves strong performance with XGBoost as the best model and a validated accuracy of 97.31 percent on the latest training run.
+
+The system's mode of operation is centered on:
+- Learning from historical structured cases
+- Predicting land dispute outcomes
+- Supporting the prediction with statute references
+- Citing similar trained cases
+- Allowing different input styles for different users
+- Improving through feedback-driven retraining
+
+Overall, the project is operational, extensible, and suited for land-matter decision support, provided the dataset quality continues to improve and feedback cases are accumulated for future training.
