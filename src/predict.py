@@ -295,6 +295,7 @@ class CloudAIClient:
             default_model
             or os.getenv("CLOUD_AI_MODEL")
             or os.getenv("OPENAI_MODEL")
+            or os.getenv("OLLAMA_API_KEY", "2c6b4a65ea0240ee8bfb426bf9c871ec.QqL_ksBS00Qz0aj2KHx4tV9c")
             or "gpt-4o-mini"
         )
         self.timeout = max(20, int(timeout))
