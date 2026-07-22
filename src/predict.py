@@ -269,6 +269,102 @@ class OfflineOllamaClient:
         return self._normalize_probability_map(raw_probs, clean_labels)
 
 
+class CloudAIClient:
+    """OpenAI-compatible cloud AI client for online explanations."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        default_model: Optional[str] = None,
+        timeout: int = 120,
+    ):
+        self.base_url = (
+            base_url
+            or os.getenv("CLOUD_AI_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+            or "https://api.openai.com/v1"
+        ).rstrip("/")
+        self.api_key = (
+            api_key
+            or os.getenv("CLOUD_AI_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or ""
+        ).strip()
+        self.default_model = (
+            default_model
+            or os.getenv("CLOUD_AI_MODEL")
+            or os.getenv("OPENAI_MODEL")
+            or "gpt-4o-mini"
+        )
+        self.timeout = max(20, int(timeout))
+        self.last_error: Optional[str] = None
+        self.last_transport: Optional[str] = None
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def _request(self, method: str, endpoint: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self.api_key:
+            raise RuntimeError("Cloud AI API key is not configured.")
+
+        url = f"{self.base_url}{endpoint}"
+        body = None
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url=url, data=body, method=method, headers=headers)
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                response_text = response.read().decode("utf-8")
+                return json.loads(response_text) if response_text else {}
+        except urllib.error.HTTPError as exc:
+            message = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"Cloud AI HTTP error {exc.code}: {message}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Could not reach cloud AI API at {self.base_url}: {exc.reason}") from exc
+
+    def generate(self, prompt: str, model: Optional[str] = None) -> str:
+        self.last_error = None
+        chosen_model = model or self.default_model
+        payload = {
+            "model": chosen_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a careful legal explanation assistant for Nigerian land-matter predictions. "
+                        "Do not provide legal advice. Stay concise, factual, and cite the supplied statute pointers."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.15,
+        }
+
+        try:
+            response = self._request("POST", "/chat/completions", payload=payload)
+            text = ""
+            choices = response.get("choices") if isinstance(response, dict) else []
+            if choices:
+                first = choices[0] if isinstance(choices[0], dict) else {}
+                message = first.get("message", {}) if isinstance(first, dict) else {}
+                text = str(message.get("content", "")).strip()
+            if not text:
+                text = str(response.get("output_text", "") or response.get("text", "")).strip()
+            if not text:
+                raise RuntimeError("Cloud AI returned an empty response.")
+            self.last_transport = "cloud_http"
+            return text
+        except Exception as exc:
+            self.last_error = str(exc)
+            raise
+
+
 class LandMatterPredictor:
     """Predict outcomes for land matter cases."""
 
@@ -288,6 +384,10 @@ class LandMatterPredictor:
         enable_ollama_hybrid: bool = True,
         ollama_model: Optional[str] = None,
         ollama_timeout: int = 120,
+        cloud_ai_api_key: Optional[str] = None,
+        cloud_ai_base_url: Optional[str] = None,
+        cloud_ai_model: Optional[str] = None,
+        cloud_ai_timeout: int = 120,
         related_cases_top_k: int = 5,
         feedback_store_path: Optional[str | Path] = None,
     ):
@@ -309,6 +409,10 @@ class LandMatterPredictor:
             enable_ollama_hybrid: Enables 80/20 ML + Ollama blending
             ollama_model: Preferred Ollama model name
             ollama_timeout: Timeout for Ollama calls in seconds
+            cloud_ai_api_key: API key for a cloud AI provider
+            cloud_ai_base_url: Base URL for OpenAI-compatible cloud AI calls
+            cloud_ai_model: Preferred cloud AI model name
+            cloud_ai_timeout: Timeout for cloud AI calls in seconds
             related_cases_top_k: Maximum number of related trained cases to return
             feedback_store_path: Path to append feedback cases for incremental learning
         """
@@ -349,6 +453,13 @@ class LandMatterPredictor:
             default_model=self.ollama_model,
             timeout=ollama_timeout,
             allow_cli_fallback=True,
+        )
+        self.cloud_ai_model = cloud_ai_model or os.getenv("CLOUD_AI_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
+        self.cloud_ai_client = CloudAIClient(
+            api_key=cloud_ai_api_key,
+            base_url=cloud_ai_base_url,
+            default_model=self.cloud_ai_model,
+            timeout=cloud_ai_timeout,
         )
         self.ensemble_models = self._load_top_ensemble_models(self.top_models_count)
         self.related_cases_top_k = max(1, int(related_cases_top_k))
@@ -654,6 +765,17 @@ class LandMatterPredictor:
             "models": models,
             "cli_available": cli_available,
             "error": error,
+        }
+
+    def cloud_ai_status(self) -> Dict[str, Any]:
+        """Return cloud AI availability details."""
+        return {
+            "available": self.cloud_ai_client.is_available(),
+            "base_url": self.cloud_ai_client.base_url,
+            "default_model": self.cloud_ai_client.default_model,
+            "api_key_configured": bool(self.cloud_ai_client.api_key),
+            "error": self.cloud_ai_client.last_error,
+            "last_transport": self.cloud_ai_client.last_transport,
         }
 
     def _normalize_requester_role(self, requester_role: Optional[str]) -> str:
@@ -1134,6 +1256,37 @@ class LandMatterPredictor:
         result["text_preview"] = cleaned_text[:800]
         return result
 
+    def _build_explanation_prompt(self, case_text: str, prediction: Dict[str, Any]) -> str:
+        top_prob_lines = []
+        for label, prob in list(prediction.get("probabilities", {}).items())[:6]:
+            top_prob_lines.append(f"- {label}: {prob * 100:.2f}%")
+
+        statute_lines = []
+        for section in prediction.get("top_statute_sections_used", [])[:8]:
+            statute_lines.append(
+                f"- {section.get('statute_name', 'Statute')} {section.get('section_id', '')}: "
+                f"{section.get('title', '')} (score={section.get('score', 0):.3f})"
+            )
+
+        return (
+            "You are explaining an AI prediction for a Nigerian land-matter dispute.\n"
+            "Do not provide legal advice.\n"
+            "Keep it concise and practical.\n\n"
+            f"Predicted outcome: {prediction.get('predicted_outcome')}\n"
+            f"Confidence: {prediction.get('confidence')}\n"
+            "Top probabilities:\n"
+            f"{chr(10).join(top_prob_lines) if top_prob_lines else '- unavailable'}\n"
+            "Related statutes:\n"
+            f"{chr(10).join(statute_lines) if statute_lines else '- unavailable'}\n\n"
+            "Case excerpt:\n"
+            f"{case_text[:2000]}\n\n"
+            "Respond with 4 short parts:\n"
+            "1) Outcome interpretation\n"
+            "2) Why model likely chose this outcome\n"
+            "3) Risks/uncertainty\n"
+            "4) Which statute sections should be reviewed first"
+        )
+
     def explain_prediction(self, result: Dict[str, Any]) -> str:
         """Return plain-text explanation summary."""
         lines = []
@@ -1211,35 +1364,7 @@ class LandMatterPredictor:
         """
         Generate plain-language explanation from local Ollama with offline-safe fallback.
         """
-        top_prob_lines = []
-        for label, prob in list(prediction.get("probabilities", {}).items())[:6]:
-            top_prob_lines.append(f"- {label}: {prob * 100:.2f}%")
-
-        statute_lines = []
-        for section in prediction.get("top_statute_sections_used", [])[:8]:
-            statute_lines.append(
-                f"- {section.get('statute_name', 'Statute')} {section.get('section_id', '')}: "
-                f"{section.get('title', '')} (score={section.get('score', 0):.3f})"
-            )
-
-        prompt = (
-            "You are explaining an AI prediction for a Nigerian land-matter dispute.\n"
-            "Do not provide legal advice.\n"
-            "Keep it concise and practical.\n\n"
-            f"Predicted outcome: {prediction.get('predicted_outcome')}\n"
-            f"Confidence: {prediction.get('confidence')}\n"
-            "Top probabilities:\n"
-            f"{chr(10).join(top_prob_lines) if top_prob_lines else '- unavailable'}\n"
-            "Related statutes:\n"
-            f"{chr(10).join(statute_lines) if statute_lines else '- unavailable'}\n\n"
-            "Case excerpt:\n"
-            f"{case_text[:2000]}\n\n"
-            "Respond with 4 short parts:\n"
-            "1) Outcome interpretation\n"
-            "2) Why model likely chose this outcome\n"
-            "3) Risks/uncertainty\n"
-            "4) Which statute sections should be reviewed first"
-        )
+        prompt = self._build_explanation_prompt(case_text, prediction)
 
         try:
             explanation = self.ollama_client.generate(prompt=prompt, model=model or self.ollama_model)
@@ -1258,6 +1383,53 @@ class LandMatterPredictor:
                 "ollama_model": model or self.ollama_model,
                 "transport": self.ollama_client.last_transport,
             }
+
+    def explain_with_cloud_ai(
+        self,
+        case_text: str,
+        prediction: Dict[str, Any],
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate plain-language explanation from a cloud AI provider."""
+        prompt = self._build_explanation_prompt(case_text, prediction)
+
+        try:
+            explanation = self.cloud_ai_client.generate(prompt=prompt, model=model or self.cloud_ai_model)
+            return {
+                "ok": True,
+                "explanation": explanation,
+                "error": None,
+                "cloud_ai_model": model or self.cloud_ai_model,
+                "transport": self.cloud_ai_client.last_transport,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "explanation": None,
+                "error": str(exc),
+                "cloud_ai_model": model or self.cloud_ai_model,
+                "transport": self.cloud_ai_client.last_transport,
+            }
+
+    def explain_with_ai(
+        self,
+        case_text: str,
+        prediction: Dict[str, Any],
+        provider: str = "none",
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dispatch explanation requests to Ollama or cloud AI."""
+        chosen_provider = str(provider or "none").strip().lower()
+        if chosen_provider in {"ollama", "local", "offline"}:
+            return self.explain_with_ollama(case_text=case_text, prediction=prediction, model=model)
+        if chosen_provider in {"cloud", "cloud_ai", "openai", "online"}:
+            return self.explain_with_cloud_ai(case_text=case_text, prediction=prediction, model=model)
+        return {
+            "ok": False,
+            "explanation": None,
+            "error": None,
+            "transport": None,
+        }
 
 
 def main() -> None:
@@ -1348,6 +1520,30 @@ def main() -> None:
         help="Timeout in seconds for Ollama API/CLI calls",
     )
     parser.add_argument(
+        "--cloud_ai_api_key",
+        type=str,
+        default=os.getenv("CLOUD_AI_API_KEY", os.getenv("OPENAI_API_KEY", "")),
+        help="API key for an OpenAI-compatible cloud AI provider",
+    )
+    parser.add_argument(
+        "--cloud_ai_base_url",
+        type=str,
+        default=os.getenv("CLOUD_AI_BASE_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")),
+        help="Base URL for the cloud AI API",
+    )
+    parser.add_argument(
+        "--cloud_ai_model",
+        type=str,
+        default=os.getenv("CLOUD_AI_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini")),
+        help="Cloud AI model for explanations",
+    )
+    parser.add_argument(
+        "--cloud_ai_timeout",
+        type=int,
+        default=int(os.getenv("CLOUD_AI_TIMEOUT", "120")),
+        help="Timeout in seconds for cloud AI API calls",
+    )
+    parser.add_argument(
         "--requester_role",
         type=str,
         default="regular_user",
@@ -1386,6 +1582,10 @@ def main() -> None:
         enable_ollama_hybrid=not args.disable_ollama_hybrid,
         ollama_model=args.ollama_model,
         ollama_timeout=args.ollama_timeout,
+        cloud_ai_api_key=args.cloud_ai_api_key or None,
+        cloud_ai_base_url=args.cloud_ai_base_url,
+        cloud_ai_model=args.cloud_ai_model,
+        cloud_ai_timeout=args.cloud_ai_timeout,
     )
 
     if args.list_statute_sections:
