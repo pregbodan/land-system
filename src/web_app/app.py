@@ -35,8 +35,9 @@ HYBRID_ML_WEIGHT = float(os.getenv("HYBRID_ML_WEIGHT", "0.8"))
 HYBRID_OLLAMA_WEIGHT = float(os.getenv("HYBRID_OLLAMA_WEIGHT", "0.2"))
 DISABLE_OLLAMA_HYBRID = os.getenv("DISABLE_OLLAMA_HYBRID", "0") in {"1", "true", "yes", "on"}
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "2c6b4a65ea0240ee8bfb426bf9c871ec.QqL_ksBS00Qz0aj2KHx4tV9c")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "150"))
 DEFAULT_LAND_ACT_PDF = PROJECT_ROOT / "data" / "legal" / "Nigerian-land-use-act-2004.pdf"
 DEFAULT_EVIDENCE_ACT_PDF = PROJECT_ROOT / "data" / "legal" / "evidence-act-2011.pdf"
