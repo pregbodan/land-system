@@ -38,11 +38,6 @@ DISABLE_OLLAMA_HYBRID = os.getenv("DISABLE_OLLAMA_HYBRID", "0") in {"1", "true",
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "150"))
-CLOUD_AI_API_KEY = os.getenv("CLOUD_AI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
-CLOUD_AI_BASE_URL = os.getenv("CLOUD_AI_BASE_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
-CLOUD_AI_MODEL = os.getenv("CLOUD_AI_MODEL", os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
-CLOUD_AI_TIMEOUT = int(os.getenv("CLOUD_AI_TIMEOUT", "150"))
-DEFAULT_EXPLANATION_PROVIDER = os.getenv("DEFAULT_EXPLANATION_PROVIDER", "none").strip().lower()
 DEFAULT_LAND_ACT_PDF = PROJECT_ROOT / "data" / "legal" / "Nigerian-land-use-act-2004.pdf"
 DEFAULT_EVIDENCE_ACT_PDF = PROJECT_ROOT / "data" / "legal" / "evidence-act-2011.pdf"
 LAND_ACT_PDF_PATH = os.getenv("LAND_ACT_PDF_PATH", str(DEFAULT_LAND_ACT_PDF))
@@ -244,10 +239,6 @@ def get_predictor() -> LandMatterPredictor:
             enable_ollama_hybrid=not DISABLE_OLLAMA_HYBRID,
             ollama_model=OLLAMA_MODEL,
             ollama_timeout=OLLAMA_TIMEOUT,
-            cloud_ai_api_key=CLOUD_AI_API_KEY or None,
-            cloud_ai_base_url=CLOUD_AI_BASE_URL,
-            cloud_ai_model=CLOUD_AI_MODEL,
-            cloud_ai_timeout=CLOUD_AI_TIMEOUT,
         )
         return _predictor_instance
     except Exception as exc:
@@ -262,7 +253,6 @@ def predictor_status() -> Dict[str, Any]:
         statute = predictor.statute_status()
         hybrid = predictor.hybrid_status()
         ollama = predictor.ollama_status()
-        cloud_ai = predictor.cloud_ai_status()
         roles = predictor.requester_role_help()
         case_retriever = predictor.case_retriever_status()
         return {
@@ -274,7 +264,6 @@ def predictor_status() -> Dict[str, Any]:
             "statute": statute,
             "hybrid": hybrid,
             "ollama": ollama,
-            "cloud_ai": cloud_ai,
             "requester_roles": roles,
             "case_retriever": case_retriever,
             "feedback_store_path": str(predictor.feedback_store_path),
@@ -318,82 +307,40 @@ def predictor_status() -> Dict[str, Any]:
                 "cli_available": False,
                 "error": str(exc),
             },
-            "cloud_ai": {
-                "available": False,
-                "base_url": CLOUD_AI_BASE_URL,
-                "default_model": CLOUD_AI_MODEL,
-                "api_key_configured": bool(CLOUD_AI_API_KEY),
-                "error": str(exc),
-                "last_transport": None,
-            },
         }
 
 
-def maybe_add_ai_explanation(
+def maybe_add_ollama_explanation(
     response_payload: Dict[str, Any],
     predictor: LandMatterPredictor,
     prediction: Dict[str, Any],
     source_text: str,
-    explanation_provider: str,
+    use_ollama: bool,
     requested_model: Optional[str],
 ) -> None:
-    provider = str(explanation_provider or "none").strip().lower()
-    if provider not in {"ollama", "cloud_ai", "cloud", "openai", "online"}:
-        response_payload["ai_used"] = False
-        response_payload["ai_provider"] = "none"
-        response_payload["ai_explanation"] = None
-        response_payload["ai_error"] = None
+    if not use_ollama:
+        response_payload["ollama_used"] = False
+        response_payload["ollama_explanation"] = None
+        response_payload["ollama_error"] = None
         return
 
-    if provider == "ollama":
-        explanation_payload = predictor.explain_with_ollama(
-            case_text=source_text,
-            prediction=prediction,
-            model=requested_model,
-        )
-        ai_provider = "ollama"
-        ai_model_key = "ollama_model"
-        ai_explanation_key = "ollama_explanation"
-        ai_error_key = "ollama_error"
-        ai_used_key = "ollama_used"
-        ai_transport_key = "ollama_transport"
-    else:
-        explanation_payload = predictor.explain_with_cloud_ai(
-            case_text=source_text,
-            prediction=prediction,
-            model=requested_model,
-        )
-        ai_provider = "cloud_ai"
-        ai_model_key = "cloud_ai_model"
-        ai_explanation_key = "cloud_ai_explanation"
-        ai_error_key = "cloud_ai_error"
-        ai_used_key = "cloud_ai_used"
-        ai_transport_key = "cloud_ai_transport"
-
+    explanation_payload = predictor.explain_with_ollama(
+        case_text=source_text,
+        prediction=prediction,
+        model=requested_model,
+    )
     if explanation_payload.get("ok"):
-        response_payload["ai_used"] = True
-        response_payload["ai_provider"] = ai_provider
-        response_payload["ai_model"] = explanation_payload.get(ai_model_key) or explanation_payload.get("cloud_ai_model") or explanation_payload.get("ollama_model")
-        response_payload["ai_transport"] = explanation_payload.get("transport")
-        response_payload["ai_explanation"] = explanation_payload.get("explanation")
-        response_payload["ai_error"] = None
-        response_payload[ai_used_key] = True
-        response_payload[ai_model_key] = explanation_payload.get(ai_model_key)
-        response_payload[ai_transport_key] = explanation_payload.get("transport")
-        response_payload[ai_explanation_key] = explanation_payload.get("explanation")
-        response_payload[ai_error_key] = None
+        response_payload["ollama_used"] = True
+        response_payload["ollama_model"] = explanation_payload.get("ollama_model")
+        response_payload["ollama_transport"] = explanation_payload.get("transport")
+        response_payload["ollama_explanation"] = explanation_payload.get("explanation")
+        response_payload["ollama_error"] = None
     else:
-        response_payload["ai_used"] = False
-        response_payload["ai_provider"] = ai_provider
-        response_payload["ai_model"] = explanation_payload.get(ai_model_key) or explanation_payload.get("cloud_ai_model") or explanation_payload.get("ollama_model")
-        response_payload["ai_transport"] = explanation_payload.get("transport")
-        response_payload["ai_explanation"] = None
-        response_payload["ai_error"] = explanation_payload.get("error")
-        response_payload[ai_used_key] = False
-        response_payload[ai_model_key] = explanation_payload.get(ai_model_key)
-        response_payload[ai_transport_key] = explanation_payload.get("transport")
-        response_payload[ai_explanation_key] = None
-        response_payload[ai_error_key] = explanation_payload.get("error")
+        response_payload["ollama_used"] = False
+        response_payload["ollama_model"] = explanation_payload.get("ollama_model")
+        response_payload["ollama_transport"] = explanation_payload.get("transport")
+        response_payload["ollama_explanation"] = None
+        response_payload["ollama_error"] = explanation_payload.get("error")
 
 
 @app.get("/health")
@@ -401,9 +348,7 @@ def health():
     artifacts = load_artifacts()
     status = predictor_status()
     ollama_state = status.get("ollama", {})
-    cloud_ai_state = status.get("cloud_ai", {})
     ollama_available = bool(ollama_state.get("available", False))
-    cloud_ai_available = bool(cloud_ai_state.get("available", False))
     statute_status = status.get("statute", {})
     hybrid_status = status.get("hybrid", {})
     case_retriever_status = status.get("case_retriever", {})
@@ -415,8 +360,6 @@ def health():
             "predictor_error": status["error"],
             "ollama_available": ollama_available,
             "ollama_cli_available": bool(ollama_state.get("cli_available", False)),
-            "cloud_ai_available": cloud_ai_available,
-            "cloud_ai_model": cloud_ai_state.get("default_model"),
             "statute_enabled": statute_status.get("enabled", False),
             "statute_ready": statute_status.get("ready", False),
             "statute_sections_count": statute_status.get("sections_count", 0),
@@ -452,7 +395,6 @@ def api_config():
                 "top_k": LAND_STATUTE_TOP_K,
             },
             "ollama": status.get("ollama", {}),
-            "cloud_ai": status.get("cloud_ai", {}),
             "retrain": _get_retrain_status_snapshot(),
             "paths": load_artifacts()["paths"],
         }
@@ -564,14 +506,8 @@ def api_related_cases():
 def api_predict_text():
     payload = request.get_json(silent=True) or {}
     text = str(payload.get("text", "")).strip()
-    explanation_provider = str(payload.get("explanation_provider", "")).strip().lower()
-    if not explanation_provider:
-        explanation_provider = "ollama" if bool(payload.get("use_ollama", False)) else DEFAULT_EXPLANATION_PROVIDER
-    explanation_model = str(payload.get("explanation_model", "")).strip() or None
-    if explanation_provider == "ollama" and explanation_model is None:
-        explanation_model = str(payload.get("ollama_model", "")).strip() or None
-    if explanation_provider in {"cloud_ai", "cloud", "openai", "online"} and explanation_model is None:
-        explanation_model = str(payload.get("cloud_ai_model", "")).strip() or None
+    use_ollama = bool(payload.get("use_ollama", False))
+    ollama_model = str(payload.get("ollama_model", "")).strip() or None
     requester_role = str(payload.get("requester_role", "regular_user")).strip() or "regular_user"
 
     if not text:
@@ -581,13 +517,13 @@ def api_predict_text():
         predictor = get_predictor()
         prediction = predictor.predict_from_text(text, requester_role=requester_role)
         response_payload: Dict[str, Any] = {"ok": True, "prediction": prediction}
-        maybe_add_ai_explanation(
+        maybe_add_ollama_explanation(
             response_payload=response_payload,
             predictor=predictor,
             prediction=prediction,
             source_text=text,
-            explanation_provider=explanation_provider,
-            requested_model=explanation_model,
+            use_ollama=use_ollama,
+            requested_model=ollama_model,
         )
         return jsonify(response_payload)
     except Exception as exc:
@@ -604,14 +540,8 @@ def api_predict_file():
     if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
         return jsonify({"ok": False, "error": "Only .pdf and .docx files are supported."}), 400
 
-    explanation_provider = str(request.form.get("explanation_provider", "")).strip().lower()
-    if not explanation_provider:
-        explanation_provider = "ollama" if str(request.form.get("use_ollama", "false")).lower() in {"1", "true", "yes", "on"} else DEFAULT_EXPLANATION_PROVIDER
-    explanation_model = str(request.form.get("explanation_model", "")).strip() or None
-    if explanation_provider == "ollama" and explanation_model is None:
-        explanation_model = str(request.form.get("ollama_model", "")).strip() or None
-    if explanation_provider in {"cloud_ai", "cloud", "openai", "online"} and explanation_model is None:
-        explanation_model = str(request.form.get("cloud_ai_model", "")).strip() or None
+    use_ollama = str(request.form.get("use_ollama", "false")).lower() in {"1", "true", "yes", "on"}
+    ollama_model = str(request.form.get("ollama_model", "")).strip() or None
     requester_role = str(request.form.get("requester_role", "regular_user")).strip() or "regular_user"
 
     temp_path = None
@@ -624,13 +554,13 @@ def api_predict_file():
         prediction = predictor.predict_from_file(temp_path, requester_role=requester_role)
         response_payload: Dict[str, Any] = {"ok": True, "prediction": prediction}
         source_text = str(prediction.get("text_preview", ""))
-        maybe_add_ai_explanation(
+        maybe_add_ollama_explanation(
             response_payload=response_payload,
             predictor=predictor,
             prediction=prediction,
             source_text=source_text,
-            explanation_provider=explanation_provider,
-            requested_model=explanation_model,
+            use_ollama=use_ollama,
+            requested_model=ollama_model,
         )
         return jsonify(response_payload)
     except Exception as exc:
@@ -762,7 +692,6 @@ def dashboard():
     ollama_state = predict_status.get("ollama", {})
     ollama_models = ollama_state.get("models", []) if isinstance(ollama_state, dict) else []
     ollama_error = ollama_state.get("error") if isinstance(ollama_state, dict) else None
-    cloud_ai_state = predict_status.get("cloud_ai", {})
 
     html = """
 <!doctype html>
@@ -1032,21 +961,14 @@ def dashboard():
 
         <div class="row">
           <div class="field">
-            <label for="explanationProvider">Explanation Engine</label>
-            <select id="explanationProvider">
-              <option value="none" {% if default_explanation_provider == "none" %}selected{% endif %}>None</option>
-              <option value="ollama" {% if default_explanation_provider == "ollama" %}selected{% endif %}>Ollama (local)</option>
-              <option value="cloud_ai" {% if default_explanation_provider in ["cloud_ai", "cloud", "openai", "online"] %}selected{% endif %}>Cloud AI</option>
-            </select>
-            <div class="tiny" style="margin-top:4px;">Choose which AI explains the prediction.</div>
+            <label for="useOllama">
+              <input id="useOllama" type="checkbox" style="width:auto; margin-right:6px;" />
+              Add Ollama Explanation
+            </label>
           </div>
           <div class="field">
             <label for="ollamaModel">Ollama Model (optional)</label>
             <input id="ollamaModel" type="text" placeholder="e.g. llama3" value="{{ default_ollama_model }}" />
-          </div>
-          <div class="field">
-            <label for="cloudAiModel">Cloud AI Model (optional)</label>
-            <input id="cloudAiModel" type="text" placeholder="e.g. gpt-4o-mini" value="{{ default_cloud_ai_model }}" />
           </div>
         </div>
 
@@ -1058,16 +980,11 @@ def dashboard():
         </div>
 
         <div class="field" style="margin-top:12px;">
-          <div class="tiny"><strong>AI Status:</strong>
+          <div class="tiny"><strong>Ollama Status:</strong>
             {% if ollama_models %}
               connected ({{ ollama_models|length }} model(s) found)
             {% else %}
               {% if ollama_error %}not connected: {{ ollama_error }}{% else %}not connected{% endif %}
-            {% endif %}
-            {% if cloud_ai_status.get("available") %}
-              | Cloud AI ready ({{ cloud_ai_status.get("default_model", "N/A") }})
-            {% else %}
-              | Cloud AI not ready{% if cloud_ai_status.get("error") %}: {{ cloud_ai_status.get("error") }}{% endif %}
             {% endif %}
           </div>
           <div class="tiny" style="margin-top:4px;"><strong>Statute Support:</strong>
@@ -1151,9 +1068,9 @@ def dashboard():
           </div>
         </div>
 
-        <div id="aiArea" class="hidden" style="margin-top: 14px;">
-          <h3 id="aiHeading" style="margin:0 0 8px 0;">AI Explanation</h3>
-          <pre id="aiText"></pre>
+        <div id="ollamaArea" class="hidden" style="margin-top: 14px;">
+          <h3 style="margin:0 0 8px 0;">Ollama Explanation</h3>
+          <pre id="ollamaText"></pre>
         </div>
       </div>
     </section>
@@ -1220,12 +1137,10 @@ def dashboard():
     const statusNode = document.getElementById("requestStatus");
     const errorBox = document.getElementById("errorBox");
     const resultArea = document.getElementById("resultArea");
-    const aiArea = document.getElementById("aiArea");
-    const aiHeading = document.getElementById("aiHeading");
-    const aiText = document.getElementById("aiText");
-    const explanationProvider = document.getElementById("explanationProvider");
+    const ollamaArea = document.getElementById("ollamaArea");
+    const ollamaText = document.getElementById("ollamaText");
+    const useOllama = document.getElementById("useOllama");
     const ollamaModel = document.getElementById("ollamaModel");
-    const cloudAiModel = document.getElementById("cloudAiModel");
     const caseText = document.getElementById("caseText");
     const caseFile = document.getElementById("caseFile");
     const requesterRole = document.getElementById("requesterRole");
@@ -1275,13 +1190,6 @@ def dashboard():
     function setLoading(loading, message) {
       predictBtn.disabled = loading;
       statusNode.textContent = message;
-    }
-
-    function normalizeProvider(provider) {
-      const value = String(provider || "none").trim().toLowerCase();
-      if (["ollama", "local", "offline"].includes(value)) return "ollama";
-      if (["cloud_ai", "cloud", "openai", "online"].includes(value)) return "cloud_ai";
-      return "none";
     }
 
     function updateRoleHelp() {
@@ -1466,13 +1374,12 @@ def dashboard():
     async function submitPrediction() {
       clearError();
       resultArea.classList.add("hidden");
-      aiArea.classList.add("hidden");
-      aiText.textContent = "";
+      ollamaArea.classList.add("hidden");
+      ollamaText.textContent = "";
       updateRoleHelp();
 
-      const provider = normalizeProvider(explanationProvider.value || "none");
+      const shouldUseOllama = useOllama.checked;
       const requestedModel = (ollamaModel.value || "").trim();
-      const requestedCloudModel = (cloudAiModel.value || "").trim();
       const role = (requesterRole.value || "regular_user").trim();
       latestPrediction = null;
       latestCaseText = "";
@@ -1491,10 +1398,8 @@ def dashboard():
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({
               text,
-              explanation_provider: provider,
-              explanation_model: provider === "cloud_ai" ? requestedCloudModel : requestedModel,
+              use_ollama: shouldUseOllama,
               ollama_model: requestedModel,
-              cloud_ai_model: requestedCloudModel,
               requester_role: role
             })
           });
@@ -1504,10 +1409,8 @@ def dashboard():
           }
           const formData = new FormData();
           formData.append("file", caseFile.files[0]);
-          formData.append("explanation_provider", provider);
-          formData.append("explanation_model", provider === "cloud_ai" ? requestedCloudModel : requestedModel);
+          formData.append("use_ollama", shouldUseOllama ? "true" : "false");
           formData.append("ollama_model", requestedModel);
-          formData.append("cloud_ai_model", requestedCloudModel);
           formData.append("requester_role", role);
           response = await fetch("/api/predict/file", {
             method: "POST",
@@ -1526,19 +1429,12 @@ def dashboard():
         }
         setLoading(false, "Prediction completed.");
 
-        const explanationText = payload.ai_explanation || payload.ollama_explanation || payload.cloud_ai_explanation;
-        const explanationError = payload.ai_error || payload.ollama_error || payload.cloud_ai_error;
-        const explanationProviderUsed = normalizeProvider(payload.ai_provider || provider);
-        if (explanationText) {
-          aiArea.classList.remove("hidden");
-          aiHeading.textContent =
-            explanationProviderUsed === "cloud_ai" ? "Cloud AI Explanation" : "Ollama Explanation";
-          aiText.textContent = explanationText;
-        } else if (explanationError) {
-          aiArea.classList.remove("hidden");
-          aiHeading.textContent =
-            explanationProviderUsed === "cloud_ai" ? "Cloud AI Explanation" : "Ollama Explanation";
-          aiText.textContent = (explanationProviderUsed === "cloud_ai" ? "Cloud AI error: " : "Ollama error: ") + explanationError;
+        if (payload.ollama_explanation) {
+          ollamaArea.classList.remove("hidden");
+          ollamaText.textContent = payload.ollama_explanation;
+        } else if (payload.ollama_error) {
+          ollamaArea.classList.remove("hidden");
+          ollamaText.textContent = "Ollama error: " + payload.ollama_error;
         }
       } catch (err) {
         setLoading(false, "Request failed.");
@@ -1612,16 +1508,13 @@ def dashboard():
         retrain_state=retrain_state,
         model_path=str(MODEL_PATH),
         default_ollama_model=OLLAMA_MODEL,
-        default_cloud_ai_model=CLOUD_AI_MODEL,
-        default_explanation_provider=DEFAULT_EXPLANATION_PROVIDER,
         ollama_models=ollama_models,
         ollama_error=ollama_error,
-        cloud_ai_status=cloud_ai_state,
     )
 
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "0.0.0.0 ")
+    host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "5000"))
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
     app.run(host=host, port=port, debug=debug)
